@@ -1,0 +1,105 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Boat Telemetry Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 2rem;
+      background: #f0f4f8;
+      color: #333;
+    }
+    h2 {
+      text-align: center;
+    }
+    .chart-container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+  </style>
+</head>
+<body>
+  <h2>Boat Telemetry Dashboard</h2>
+  <div class="chart-container">
+    <canvas id="telemetryChart"></canvas>
+  </div>
+  <div style="text-align: center; margin-top: 2rem;">
+    <button onclick="sendButtonPress()" style="padding: 0.5rem 1rem; font-size: 1rem;">Random Button</button>
+  </div>
+
+  <script>
+    const ctx = document.getElementById('telemetryChart').getContext('2d');
+    const labels = [];
+    const data = {
+      labels: labels,
+      datasets: [{
+        label: 'Speed (knots)',
+        data: [],
+        fill: false,
+        borderColor: 'rgba(54, 162, 235, 1)',
+        tension: 0.1
+      },
+      {
+        label: 'Temp (Celcius)',
+        data: [],
+        fill: false,
+        borderColor: 'rgba(255, 0, 0, 0.8)',
+        tension: 0.1
+      }
+    ]
+    };
+    const config = {
+      type: 'line',
+      data: data,
+      options: {
+        scales: {
+          x: {
+            ticks: {
+              autoSkip: true,
+              maxTicksLimit: 10
+            }
+          },
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    };
+    const telemetryChart = new Chart(ctx, config);
+
+    async function fetchData() {
+      const res = await fetch('/api/data');
+      const json = await res.json();
+      const timestamp = new Date().toLocaleTimeString();
+      
+      data.labels.push(timestamp);
+      data.datasets[0].data.push(json.speed);
+      data.datasets[1].data.push(json.temp);
+      
+      if (data.labels.length > 20) {
+        data.labels.shift();
+        data.datasets[0].data.shift();
+        data.datasets[1].data.shift();
+      }
+      
+      telemetryChart.update();
+    }
+
+    async function sendButtonPress() {
+        const res = await fetch('/api/button', {
+            method: 'POST'
+        })
+        const data = await res.json()
+        console.log(data)
+        alert('Function triggered on server!')
+    }
+
+    setInterval(fetchData, 1000);
+  </script>
+</body>
+</html>
