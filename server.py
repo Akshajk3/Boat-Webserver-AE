@@ -16,9 +16,13 @@ def get_data():
     }
     return jsonify(data)
 
-@app.route('/')
+@app.route('/gnd')
 def index():
-    return render_template('index.html')
+    return render_template('ground.html')
+
+@app.route('/')
+def boat():
+    return render_template('boat.html')
 
 @app.route('/api/button', methods=['POST'])
 def button_pressed():
