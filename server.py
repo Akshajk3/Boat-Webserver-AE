@@ -3,17 +3,37 @@ from pyngrok import ngrok
 import random
 import time
 import threading
+import serial
 
 app = Flask(__name__)
 
+arduino = serial.Serial(port='COM4', baudrate=9600, timeout=0.1)
+
+motor_running = False
+
+def read_serial():
+    data = arduino.readline()
+    if data == "Failed to get data!":
+        motor_running = False
+    else:
+        motor_running = True
+    
+    
+
 @app.route('/api/data')
 def get_data():
-    data = {
-        'temp' : round(20 + random.random() * 10, 2),
-        'humidity' : round(50 + random.random() * 20, 2),
-        'timestamp' : int(time.time()),
-        'speed': round(random.random() * 30, 2)
-    }
+    if motor_running:
+        data = {
+            'temp' : round(20 + random.random() * 10, 2),
+            'humidity' : round(50 + random.random() * 20, 2),
+            'timestamp' : int(time.time()),
+            'speed': round(random.random() * 30, 2),
+            'motor_running': True
+        }
+    else:
+        data = {
+            'motor_running' : False
+        }
     return jsonify(data)
 
 @app.route('/gnd')
