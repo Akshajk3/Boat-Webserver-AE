@@ -32,43 +32,53 @@
     <button onclick="sendButtonPress()" style="padding: 0.5rem 1rem; font-size: 1rem;">Random Button</button>
   </div>
 
+  <div>
+    <p>Mode: <span id="mode-display">--</span></p>
+    <p>Power Source: <span id="power-source-display">--</span></p>
+  </div>
+
   <script>
     const ctx = document.getElementById('telemetryChart').getContext('2d');
     const labels = [];
     const data = {
-      labels: labels,
-      datasets: [{
-        label: 'Speed (knots)',
-        data: [],
-        fill: false,
-        borderColor: 'rgba(54, 162, 235, 1)',
-        tension: 0.1
-      },
-      {
-        label: 'Temp (Celcius)',
-        data: [],
-        fill: false,
-        borderColor: 'rgba(255, 0, 0, 0.8)',
-        tension: 0.1
-      }
-    ]
-    };
-    const config = {
-      type: 'line',
-      data: data,
-      options: {
-        scales: {
-          x: {
-            ticks: {
-              autoSkip: true,
-              maxTicksLimit: 10
-            }
-          },
-          y: {
-            beginAtZero: true
-          }
+      labels: labels, // timestamps or elapsed time
+      datasets: [
+        {
+          label: 'RPM',
+          data: [],
+          fill: false,
+          borderColor: 'rgba(54, 162, 235, 1)', // Blue
+          tension: 0.1
+        },
+        {
+          label: 'Voltage (V)',
+          data: [],
+          fill: false,
+          borderColor: 'rgba(255, 99, 132, 0.8)', // Red
+          tension: 0.1
+        },
+        {
+          label: 'Current (A)',
+          data: [],
+          fill: false,
+          borderColor: 'rgba(255, 206, 86, 0.8)', // Yellow
+          tension: 0.1
+        },
+        {
+          label: 'Power (W)',
+          data: [],
+          fill: false,
+          borderColor: 'rgba(75, 192, 192, 0.8)', // Teal
+          tension: 0.1
+        },
+        {
+          label: 'Duty Cycle (%)',
+          data: [],
+          fill: false,
+          borderColor: 'rgba(153, 102, 255, 0.8)', // Purple
+          tension: 0.1
         }
-      }
+      ]
     };
     const telemetryChart = new Chart(ctx, config);
 
@@ -78,16 +88,34 @@
       const timestamp = new Date().toLocaleTimeString();
       
       data.labels.push(timestamp);
-      data.datasets[0].data.push(json.speed);
-      data.datasets[1].data.push(json.temp);
-      
-      if (data.labels.length > 20) {
-        data.labels.shift();
-        data.datasets[0].data.shift();
-        data.datasets[1].data.shift();
+      data.datasets[0].data.push(json.rpm);
+      data.datasets[1].data.push(json.volts);
+      data.datasets[2].data.push(json.amps);
+      data.datasets[3].data.push(json.power);
+      data.datasets[4].data.push(json.duty);
+
+      var mode = json.mode;
+      var power_source = json.power_source;
+      var motor_running = json.motor_running;
+
+      if (motor_running) {
+        document.getElementById('mode-display').textContent = data.mode;
+        document.getElementById('power-source-display').textContent = data.power_source;
+        
+        if (data.labels.length > 20) {
+          data.labels.shift();
+          data.datasets[0].data.shift();
+          data.datasets[1].data.shift();
+          data.datasets[2].data.shift();
+          data.datasets[3].data.shift();
+          data.datasets[4].data.shift();
+        }
+        
+        telemetryChart.update();
       }
-      
-      telemetryChart.update();
+      else {
+        console.log("Failed to Get Data");
+      }
     }
 
     async function sendButtonPress() {
