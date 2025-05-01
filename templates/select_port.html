@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Select Serial Port</title></head>
+<body>
+  <h1>Select Serial Port</h1>
+  <form method="post">
+    <select name="port">
+      {% for port in ports %}
+      <option value="{{ port.device }}">{{ port.device }} - {{ port.description }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Connect</button>
+  </form>
+</body>
+</html>
