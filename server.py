@@ -1,132 +1,109 @@
-from flask import Flask, jsonify, render_template
-from pyngrok import ngrok
-import time
+from flask import Flask, jsonify, render_template, request
+from pyvesc import VESC
+from pyvesc.VESC.messages import SetRPM, SetCurrent
+import serial.tools.list_ports
 import threading
-import serial
-from serial.tools import list_ports
-from flask import request
+import RPi.GPIO as GPIO
+import time
 
+# GPIO setup
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Throttle input
+GPIO.setup(1, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)   # Mode N
+GPIO.setup(2, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)   # Mode D
+GPIO.setup(3, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)   # Mode R
+
+# Flask setup
 app = Flask(__name__)
 
-arduino = None
-motor_running = False
-
-throttle = 0
-mode = 'NEUTRAL'
+# Global state
+vesc_motor = None
+motor_data = {}
+throttle = 0.0
+mode = 'N'
 lock = threading.Lock()
 
-def read_serial():
-    global motor_running
-    if arduino.in_waiting > 0:
-        data = arduino.readline().decode('utf-8').strip()
-        if data == "Failed to get data!":
-            motor_running = False
-        else:
-            motor_running = True
-        
+def choose_serial_port():
+    ports = list(serial.tools.list_ports.comports())
+    if not ports:
+        print("No serial ports found.")
+        exit(1)
+
+    print("Available serial ports:")
+    for i, port in enumerate(ports):
+        print(f"{i}: {port.device} - {port.description}")
+    idx = int(input("Select the port number: "))
+    return ports[idx].device
+
+def motor_control_loop(port):
+    global vesc_motor, throttle, mode, motor_data
+
+    with VESC(port, baudrate=115200, timeout=0.05) as vesc_motor:
         try:
-            rpm, volt, amps, power, duty, mode, power_source = data.split(",")
-            return rpm, volt, amps, power, duty, mode, power_source
-        except ValueError:
-            print("Bad Line: ", data)
+            while True:
+                # GPIO-based drive mode
+                if GPIO.input(1): mode = 'N'
+                elif GPIO.input(2): mode = 'D'
+                elif GPIO.input(3): mode = 'R'
 
-    return None
+                # Multiplier based on drive mode
+                multiplier = {'N': 0, 'D': 1, 'R': -1}.get(mode, 0)
 
-@app.route('/select-port', methods=['GET', 'POST'])
-def select_port():
-    global arduino
-    ports = list(list_ports.comports())
+                # Update throttle based on pin 24 or web input
+                pin_active = GPIO.input(24)
+                effective_rpm = int(throttle * multiplier * 10000) if pin_active else 0
 
-    if request.method == 'POST':
-        selected_port = request.form['port']
-        try:
-            arduino = serial.Serial(port=selected_port, baudrate=9600, timeout=0.1)
-            arduino.flush()
-            threading.Thread(target=send_data, daemon=True).start()
-            return render_template('port_selected.html', port=selected_port)
-        except serial.SerialException as e:
-            return f"Error: {e}", 400
+                with lock:
+                    vesc_motor.set_rpm(effective_rpm)
 
-    return render_template('select_port.html', ports=ports)
+                # Poll for RPM
+                rpm = vesc_motor.get_rpm()
+                motor_data = {
+                    'rpm': rpm,
+                    'mode': mode,
+                    'throttle': throttle,
+                    'motor_running': effective_rpm != 0,
+                    'timestamp': int(time.time())
+                }
 
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            vesc_motor.set_current(0)
+            print("\nStopped motor.")
+        finally:
+            GPIO.cleanup()
+
+# Flask endpoints
+@app.route('/')
+def index():
+    return render_template('boat.html')  # Replace with your own HTML
 
 @app.route('/api/data')
 def get_data():
-    data = read_serial()
-    if motor_running:
-        data = {
-            'rpm' : data.rpm,
-            'volts' : data.volt,
-            'amps' : data.amps,
-            'power': data.power,
-            'duty': data.duty,
-            'mode' : data.mode,
-            'power_source' : data.power_source,
-            'motor_running': True,
-            'timestamp' : int(time.time())
-        }
-    else:
-        data = {
-            'motor_running' : False
-        }
-    return jsonify(data)
-
-def send_data():
-    global throttle, mode, arduino
-    while True:
-        if arduino and arduino.is_open:
-            try:
-                with lock:
-                    message = f"{mode}:{throttle:.2f}\n"
-                arduino.write(message.encode('utf-8'))
-                time.sleep(0.1)
-            except serial.SerialException as e:
-                print("Serial write failed: ", e)
-                break
-        else:
-            time.sleep(1)
-
-@app.route('/gnd')
-def index():
-    return render_template('ground.html')
-
-@app.route('/')
-def boat():
-    return render_template('boat.html')
-
-@app.route('/api/button', methods=['POST'])
-def button_pressed():
-    print("Button was pressed")
-    return jsonify({'status' : 'success'})
+    with lock:
+        return jsonify(motor_data)
 
 @app.route('/api/throttle', methods=['POST'])
 def set_throttle():
     global throttle
     data = request.get_json()
-    if not data or 'throttle' in data:
-        return jsonify({'status' : 'error', 'message' : 'Throttle value missing'}), 400
+    if not data or 'throttle' not in data:
+        return jsonify({'status': 'error', 'message': 'Missing throttle'}), 400
     with lock:
-        throttle = float(data.get('throttle'))
-    print(f"Throttle Value: {throttle}")
-    return jsonify({'status' : 'success'})
+        throttle = float(data['throttle'])
+    return jsonify({'status': 'success', 'throttle': throttle})
 
 @app.route('/api/mode', methods=['POST'])
 def set_mode():
     global mode
     data = request.get_json()
-    if not data or 'mode' in data:
-        return jsonify({'status' : 'error', 'message' : 'Drive mode missing'}) , 400
+    if not data or 'mode' not in data:
+        return jsonify({'status': 'error', 'message': 'Missing mode'}), 400
     with lock:
-        mode = str(data.get('mode')).upper()
-    print(f"Drive Mode set to {mode}")
-    return jsonify({'status' : 'success'})
-    
-
-def start_ngrok():
-    ngrok.set_auth_token('2lgsFcb8grI0o8ScngYQK6GAOJf_5JdDrnQRQx9KpPeVsp5cK')
-    public_url = ngrok.connect(5000)
-    print(f"Ngrok Tunnel URL: {public_url}")
+        mode = data['mode'].upper()
+    return jsonify({'status': 'success', 'mode': mode})
 
 if __name__ == "__main__":
-    # threading.Thread(target=start_ngrok).start()
+    selected_port = choose_serial_port()
+    threading.Thread(target=motor_control_loop, args=(selected_port,), daemon=True).start()
     app.run(host='0.0.0.0', port=5000)

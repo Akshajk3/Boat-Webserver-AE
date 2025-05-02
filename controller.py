@@ -1,8 +1,12 @@
 import pyvesc
-from pyvesc.VESC.messages import GetValues, SetRPM, SetCurrent, SetRotorPositionMode, GetRotorPosition
+from pyvesc.VESC.messages import GetValues, SetRPM, SetCurrent, SetDutyCycle
 import serial
 import time
 import serial.tools.list_ports
+import RPi.GPIO as GPIO
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
 def choose_serial_port():
     ports = list(serial.tools.list_ports.comports())
@@ -25,18 +29,26 @@ def choose_serial_port():
 def get_values_example(serialport):
     with serial.Serial(serialport, baudrate=115200, timeout=0.05) as ser:
         try:
-            # Optional: Turn on rotor position reading if an encoder is installed
-            ser.write(pyvesc.encode(SetRotorPositionMode(SetRotorPositionMode.DISP_POS_MODE_ENCODER)))
+            buffer = bytearray()
 
             while True:
-                ser.write(pyvesc.encode(SetRPM(3000)))
+                if GPIO.input(24):
+                    print("Pin 24 is HIGH")
+                    ser.write(pyvesc.encode(SetRPM(3000)))
+                else:
+                    print("Pin 24 is LOW")
+                    ser.write(pyvesc.encode(SetRPM(0)))
+
                 ser.write(pyvesc.encode_request(GetValues))
 
-                if ser.in_waiting > 61:
-                    (response, consumed) = pyvesc.decode(ser.read(61))
+                if ser.in_waiting:
+                    buffer += ser.read(ser.in_waiting)
                     try:
-                        print("RPM:", response.rpm)
-                    except AttributeError:
+                        response, consumed = pyvesc.decode(buffer)
+                        buffer = buffer[consumed:]
+                        if hasattr(response, 'rpm'):
+                            print("RPM:", response.rpm)
+                    except Exception:
                         pass
 
                 time.sleep(0.1)
@@ -44,6 +56,8 @@ def get_values_example(serialport):
         except KeyboardInterrupt:
             ser.write(pyvesc.encode(SetCurrent(0)))
             print("\nStopped motor.")
+        finally:
+            GPIO.cleanup()
 
 if __name__ == "__main__":
     port = choose_serial_port()
